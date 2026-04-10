@@ -20,12 +20,6 @@ import { format, isToday, isYesterday } from 'date-fns';
 type Message = any;
 type Profile = any;
 
-type Conversation = {
-  user: Profile;
-  lastMessage: Message;
-  unreadCount: number;
-};
-
 type SearchResult = Profile & {
   friendshipStatus: 'none' | 'pending_sent' | 'pending_received' | 'accepted' | 'rejected';
   requestId?: string;
@@ -38,7 +32,6 @@ type MessagesSectionProps = {
 
 export function MessagesSection({ searchQuery, onSearchQueryChange }: MessagesSectionProps) {
   const { user } = useAuth();
-  const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedUser, setSelectedUser] = useState<Profile | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
@@ -52,14 +45,12 @@ export function MessagesSection({ searchQuery, onSearchQueryChange }: MessagesSe
     if (!user) return;
 
     loadFriendRequests();
-    fetchConversations();
 
     const subscription = supabase
       .channel('messages')
       .on('postgres_changes',
         { event: '*', schema: 'public', table: 'messages' },
         () => {
-          fetchConversations();
           if (selectedUser) {
             fetchMessages(selectedUser.id);
           }
@@ -74,11 +65,7 @@ export function MessagesSection({ searchQuery, onSearchQueryChange }: MessagesSe
 
   useEffect(() => {
     if (!user) return;
-    if (searchQuery.trim().length >= 2) {
-      searchUsers();
-    } else {
-      setSearchResults([]);
-    }
+    searchUsers();
   }, [searchQuery, user, friendRequests]);
 
   useEffect(() => {
@@ -141,20 +128,22 @@ export function MessagesSection({ searchQuery, onSearchQueryChange }: MessagesSe
   const searchUsers = async () => {
     if (!user) return;
 
-    const query = searchQuery.trim();
-    if (query.length < 2) {
-      setSearchResults([]);
-      return;
-    }
-
     setIsSearching(true);
+    const query = searchQuery.trim();
 
-    const { data: profiles, error: profilesError } = await supabase
+    let profilesQuery = supabase
       .from('profiles')
       .select('*')
-      .or(`username.ilike.%${query}%,full_name.ilike.%${query}%`)
       .neq('id', user.id)
-      .limit(20);
+      .limit(50);
+
+    if (query.length >= 1) {
+      profilesQuery = profilesQuery.or(
+        `username.ilike.%${query}%,full_name.ilike.%${query}%`
+      );
+    }
+
+    const { data: profiles, error: profilesError } = await profilesQuery;
 
     if (profilesError || !profiles) {
       console.error('User search error:', profilesError);
@@ -190,9 +179,7 @@ export function MessagesSection({ searchQuery, onSearchQueryChange }: MessagesSe
     }
 
     await loadFriendRequests();
-    if (searchQuery.trim().length >= 2) {
-      searchUsers();
-    }
+    searchUsers();
   };
 
   const respondToFriendRequest = async (requestId: string, accept: boolean) => {
@@ -207,60 +194,7 @@ export function MessagesSection({ searchQuery, onSearchQueryChange }: MessagesSe
     }
 
     await loadFriendRequests();
-    if (searchQuery.trim().length >= 2) {
-      searchUsers();
-    }
-  };
-
-  const fetchConversations = async () => {
-    if (!user) return;
-
-    const { data: allMessages, error } = await supabase
-      .from('messages')
-      .select('*')
-      .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`)
-      .order('created_at', { ascending: false });
-
-    if (error || !allMessages) return;
-
-    const conversationMap = new Map<string, { lastMessage: Message; unreadCount: number }>();
-
-    allMessages.forEach((message: any) => {
-      const partnerId = message.sender_id === user.id ? message.receiver_id : message.sender_id;
-
-      if (!conversationMap.has(partnerId)) {
-        conversationMap.set(partnerId, {
-          lastMessage: message,
-          unreadCount: message.receiver_id === user.id && !message.read ? 1 : 0,
-        });
-      } else if (message.receiver_id === user.id && !message.read) {
-        const conv = conversationMap.get(partnerId)!;
-        conv.unreadCount++;
-      }
-    });
-
-    const userIds = Array.from(conversationMap.keys());
-    const { data: profiles } = await supabase
-      .from('profiles')
-      .select('*')
-      .in('id', userIds);
-
-    const conversationsList: Conversation[] = [];
-
-    conversationMap.forEach((data, userId) => {
-      const userProfile = profiles?.find((p: any) => p.id === userId);
-      if (userProfile) {
-        conversationsList.push({
-          user: userProfile,
-          lastMessage: data.lastMessage,
-          unreadCount: data.unreadCount,
-        });
-      }
-    });
-
-    setConversations(conversationsList.sort((a, b) =>
-      new Date(b.lastMessage.created_at).getTime() - new Date(a.lastMessage.created_at).getTime()
-    ));
+    searchUsers();
   };
 
   const fetchMessages = async (otherUserId: string) => {
@@ -288,8 +222,6 @@ export function MessagesSection({ searchQuery, onSearchQueryChange }: MessagesSe
       .eq('sender_id', senderId)
       .eq('receiver_id', user.id)
       .eq('read', false);
-
-    fetchConversations();
   };
 
   const sendMessage = async () => {
@@ -321,56 +253,12 @@ export function MessagesSection({ searchQuery, onSearchQueryChange }: MessagesSe
     return format(messageDate, 'MMM d');
   };
 
-  const searchResultsEmpty = searchQuery.trim().length >= 2 && !isSearching && searchResults.length === 0;
   const incomingRequests = friendRequests.filter(
     (request) => request.status === 'pending' && request.receiver_id === user?.id
   );
 
   const selectedFriendship = selectedUser ? getFriendshipInfo(selectedUser.id) : null;
   const canChat = selectedFriendship?.status === 'accepted';
-
-  const filteredConversations = conversations.filter((conv) =>
-    conv.user.full_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    conv.user.username.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
-  const renderConversation = (conversation: Conversation) => (
-    <motion.button
-      key={conversation.user.id}
-      onClick={() => setSelectedUser(conversation.user)}
-      className={`w-full p-4 flex items-center gap-3 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors border-b border-slate-100 dark:border-slate-700 ${
-        selectedUser?.id === conversation.user.id ? 'bg-indigo-50 dark:bg-indigo-900/20' : ''
-      }`}
-      whileHover={{ x: 4 }}
-    >
-      <div className="relative">
-        <div className="w-12 h-12 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-semibold">
-          {(conversation.user.full_name?.[0] || conversation.user.username[0]).toUpperCase()}
-        </div>
-        {conversation.unreadCount > 0 && (
-          <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center">
-            {conversation.unreadCount}
-          </span>
-        )}
-      </div>
-      <div className="flex-1 text-left min-w-0">
-        <p className="font-semibold text-slate-900 dark:text-white truncate">
-          {conversation.user.full_name || conversation.user.username}
-        </p>
-        <p className={`text-sm truncate ${
-          conversation.unreadCount > 0
-            ? 'text-slate-900 dark:text-white font-medium'
-            : 'text-slate-500 dark:text-slate-400'
-        }`}>
-          {conversation.lastMessage.sender_id === user?.id ? 'You: ' : ''}
-          {conversation.lastMessage.content}
-        </p>
-      </div>
-      <span className="text-xs text-slate-400">
-        {formatMessageDate(conversation.lastMessage.created_at)}
-      </span>
-    </motion.button>
-  );
 
   const renderSearchResult = (result: SearchResult) => {
     const isAccepted = result.friendshipStatus === 'accepted';
@@ -492,30 +380,21 @@ export function MessagesSection({ searchQuery, onSearchQueryChange }: MessagesSe
               )}
 
               <div className="flex-1 overflow-y-auto">
-                {searchQuery.trim().length >= 2 ? (
-                  <div>
-                    {isSearching ? (
-                      <div className="p-4 text-sm text-slate-500 dark:text-slate-400">Searching users...</div>
-                    ) : searchResults.length > 0 ? (
-                      searchResults.map(renderSearchResult)
-                    ) : (
-                      <div className="p-8 text-center text-slate-500 dark:text-slate-400">
-                        {searchResultsEmpty
-                          ? 'No users found. Try a different name or username.'
-                          : 'Type at least 2 characters to search.'}
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div>
-                    {filteredConversations.map(renderConversation)}
-                    {filteredConversations.length === 0 && (
-                      <div className="p-8 text-center text-slate-500 dark:text-slate-400">
-                        No conversations yet. Search for friends above to send a request.
-                      </div>
-                    )}
-                  </div>
-                )}
+                <div>
+                  {isSearching ? (
+                    <div className="p-4 text-sm text-slate-500 dark:text-slate-400">Searching users...</div>
+                  ) : searchResults.length > 0 ? (
+                    searchResults.map(renderSearchResult)
+                  ) : searchQuery.trim().length === 0 ? (
+                    <div className="p-8 text-center text-slate-500 dark:text-slate-400">
+                      No users available yet. Check back after people register.
+                    </div>
+                  ) : (
+                    <div className="p-8 text-center text-slate-500 dark:text-slate-400">
+                      No users found. Try a different name or username.
+                    </div>
+                  )}
+                </div>
               </div>
             </motion.div>
           )}
