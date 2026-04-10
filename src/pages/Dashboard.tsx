@@ -49,10 +49,36 @@ export function Dashboard() {
   // Fetch unread messages count
   useEffect(() => {
     const fetchUnreadCount = async () => {
+      if (!profile?.id) {
+        setUnreadCount(0);
+        return;
+      }
+
+      const { data: requests, error: requestError } = await supabase
+        .from('friend_requests')
+        .select('*')
+        .or(`sender_id.eq.${profile.id},receiver_id.eq.${profile.id}`);
+
+      if (requestError) {
+        console.error('Friend requests fetch error:', requestError);
+        setUnreadCount(0);
+        return;
+      }
+
+      const acceptedFriendIds = (requests || [])
+        .filter((request: any) => request.status === 'accepted')
+        .map((request: any) => (request.sender_id === profile.id ? request.receiver_id : request.sender_id));
+
+      if (acceptedFriendIds.length === 0) {
+        setUnreadCount(0);
+        return;
+      }
+
       const { count } = await supabase
         .from('messages')
         .select('*', { count: 'exact', head: true })
-        .eq('receiver_id', profile?.id)
+        .eq('receiver_id', profile.id)
+        .in('sender_id', acceptedFriendIds)
         .eq('read', false);
       
       setUnreadCount(count || 0);

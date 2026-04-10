@@ -86,11 +86,30 @@ export function FeedSection() {
     return () => {
       subscription.unsubscribe();
     };
-  }, []);
+  }, [profile?.id]);
+
+  const fetchFriendIds = async (): Promise<string[]> => {
+    if (!profile?.id) return [];
+
+    const { data, error } = await supabase
+      .from('friend_requests')
+      .select('*')
+      .or(`sender_id.eq.${profile.id},receiver_id.eq.${profile.id}`);
+
+    if (error || !data) {
+      return [];
+    }
+
+    return data
+      .filter((request: any) => request.status === 'accepted')
+      .map((request: any) => (request.sender_id === profile.id ? request.receiver_id : request.sender_id));
+  };
 
   const fetchPosts = async () => {
     try {
-      const { data, error } = await supabase
+      const visibleUserIds = profile ? [profile.id, ...(await fetchFriendIds())] : [];
+
+      const query = supabase
         .from('posts')
         .select(`
           *,
@@ -100,15 +119,22 @@ export function FeedSection() {
         `)
         .order('created_at', { ascending: false });
 
+      const { data, error } = profile
+        ? await query.in('user_id', visibleUserIds)
+        : await query;
+
       if (error) {
         console.warn('Posts fetch error (table may not exist):', error);
         setDbError(true);
         setPosts(SAMPLE_POSTS);
       } else if (data && data.length > 0) {
         setPosts(data);
-      } else {
-        // No posts yet, show sample posts
+      } else if (!profile) {
+        // No posts yet, show sample posts when user is not signed in
         setPosts(SAMPLE_POSTS);
+      } else {
+        // No posts from friends or your own posts yet
+        setPosts([]);
       }
     } catch (err) {
       console.warn('Posts fetch exception:', err);
