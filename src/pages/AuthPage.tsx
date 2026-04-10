@@ -51,7 +51,7 @@ export function AuthPage({ onBack }: AuthPageProps) {
       return 'Unable to connect to server. Please check your internet connection or try again later.';
     }
     if (message.includes('Email not confirmed')) {
-      return 'Please check your email to confirm your account before signing in.';
+      return 'Please check your email to confirm your account before signing in. If you did not receive the message, check spam or use a valid email address.';
     }
     if (message.includes('Invalid login credentials')) {
       return 'Invalid email or password. Please try again.';
@@ -85,14 +85,19 @@ export function AuthPage({ onBack }: AuthPageProps) {
         const { error } = await signIn(formData.email, formData.password);
         if (error) throw error;
       } else {
-        const { error } = await signUp(
-          formData.email, 
-          formData.password, 
-          formData.username, 
+        const { error, requiresEmailConfirmation } = await signUp(
+          formData.email,
+          formData.password,
+          formData.username,
           formData.fullName
         );
         if (error) throw error;
-        setSuccess('Account created successfully! Please check your email to verify your account.');
+
+        if (requiresEmailConfirmation) {
+          setSuccess('Account created successfully! Please check your email to verify your account before signing in.');
+        } else {
+          setSuccess('Account created successfully! You are now signed in.');
+        }
       }
     } catch (err: any) {
       console.error('Auth error:', err);

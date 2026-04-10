@@ -9,7 +9,7 @@ interface AuthContextType {
   profile: Profile | null;
   isLoading: boolean;
   signIn: (email: string, password: string) => Promise<{ error: AuthError | null }>;
-  signUp: (email: string, password: string, username: string, fullName: string) => Promise<{ error: AuthError | null }>;
+  signUp: (email: string, password: string, username: string, fullName: string) => Promise<{ error: AuthError | null; requiresEmailConfirmation: boolean }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 }
@@ -82,7 +82,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  async function signUp(email: string, password: string, username: string, fullName: string): Promise<{ error: AuthError | null }> {
+  async function signUp(email: string, password: string, username: string, fullName: string): Promise<{ error: AuthError | null; requiresEmailConfirmation: boolean }> {
     try {
       // Step 1: Create auth user
       const { data: authData, error: signUpError } = await supabase.auth.signUp({
@@ -98,11 +98,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (signUpError) {
         console.error('Signup error:', signUpError);
-        return { error: signUpError };
+        return { error: signUpError, requiresEmailConfirmation: false };
       }
 
       if (!authData.user) {
-        return { error: { message: 'User creation failed' } as AuthError };
+        return { error: { message: 'User creation failed' } as AuthError, requiresEmailConfirmation: false };
+      }
+
+      // If the user is auto-signed in, update local state.
+      if (authData.session?.user) {
+        setUser(authData.session.user);
+        fetchProfile(authData.session.user.id);
       }
 
       // Step 2: Create profile (this might fail if table doesn't exist)
@@ -124,10 +130,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Continue - profile can be created later
       }
 
-      return { error: null };
+      const requiresEmailConfirmation = !authData.session?.user;
+      return { error: null, requiresEmailConfirmation };
     } catch (err: any) {
       console.error('Sign up exception:', err);
-      return { error: err };
+      return { error: err, requiresEmailConfirmation: false };
     }
   }
 
