@@ -1,7 +1,7 @@
 [build]
   command = "npm run build"
-  publish = "functions"
-  functions = "functions"
+  publish = "dist"
+  functions = "netlify/functions"
 
 [build.environment]
   NODE_VERSION = "20"
@@ -12,4 +12,4 @@
   status = 200
 
 [functions]
-  directory = "functions"
+  directory = "netlify/functions"
