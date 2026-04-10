@@ -42,6 +42,7 @@ const navItems = [
 export function Dashboard() {
   const [activeSection, setActiveSection] = useState<Section>('feed');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const [unreadCount, setUnreadCount] = useState(0);
   const { profile, signOut } = useAuth();
   const { isDark, toggleTheme } = useTheme();
@@ -115,7 +116,12 @@ export function Dashboard() {
       case 'resources':
         return <ResourcesSection />;
       case 'messages':
-        return <MessagesSection />;
+        return (
+          <MessagesSection
+            searchQuery={searchQuery}
+            onSearchQueryChange={setSearchQuery}
+          />
+        );
       case 'gamification':
         return <GamificationSection />;
       default:
@@ -237,7 +243,9 @@ export function Dashboard() {
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
                 <input
                   type="text"
-                  placeholder="Search..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder={activeSection === 'messages' ? 'Search users to message...' : 'Search...'}
                   className="pl-10 pr-4 py-2 w-64 rounded-xl bg-slate-100 dark:bg-slate-700 border-none text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
                 />
               </div>
