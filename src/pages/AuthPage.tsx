@@ -50,6 +50,9 @@ export function AuthPage({ onBack }: AuthPageProps) {
     if (message.includes('Failed to fetch')) {
       return 'Unable to connect to server. Please check your internet connection or try again later.';
     }
+    if (message.includes('Email not confirmed')) {
+      return 'Your Supabase project is currently requiring email confirmation. Disable email confirmations in Supabase Auth settings to allow login without verification.';
+    }
     if (message.includes('Invalid login credentials')) {
       return 'Invalid email or password. Please try again.';
     }
@@ -82,7 +85,7 @@ export function AuthPage({ onBack }: AuthPageProps) {
         const { error } = await signIn(formData.email, formData.password);
         if (error) throw error;
       } else {
-        const { error } = await signUp(
+        const { error, requiresEmailConfirmation } = await signUp(
           formData.email,
           formData.password,
           formData.username,
@@ -90,7 +93,11 @@ export function AuthPage({ onBack }: AuthPageProps) {
         );
         if (error) throw error;
 
-        setSuccess('Account created successfully! You can now sign in.');
+        if (requiresEmailConfirmation) {
+          setSuccess('Account created successfully! Confirm your email to sign in, or disable email confirmations in your Supabase Auth settings.');
+        } else {
+          setSuccess('Account created successfully! You can now sign in.');
+        }
       }
     } catch (err: any) {
       console.error('Auth error:', err);
