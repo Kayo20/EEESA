@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search,
@@ -25,6 +25,14 @@ type SearchResult = Profile & {
   requestId?: string;
 };
 
+type FriendRequest = {
+  id: string;
+  sender_id: string;
+  receiver_id: string;
+  status: 'pending' | 'accepted' | 'rejected';
+  created_at: string;
+};
+
 type MessagesSectionProps = {
   searchQuery: string;
   onSearchQueryChange: (value: string) => void;
@@ -36,7 +44,7 @@ export function MessagesSection({ searchQuery, onSearchQueryChange }: MessagesSe
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
-  const [friendRequests, setFriendRequests] = useState<any[]>([]);
+  const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([]);
   const [isMobileListVisible, setIsMobileListVisible] = useState(true);
   const [isSearching, setIsSearching] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -68,17 +76,24 @@ export function MessagesSection({ searchQuery, onSearchQueryChange }: MessagesSe
     searchUsers();
   }, [searchQuery, user, friendRequests]);
 
+  const markMessagesAsRead = useCallback(async (senderId: string) => {
+    if (!user) return;
+
+    await supabase
+      .from('messages')
+      .update({ read: true })
+      .eq('sender_id', senderId)
+      .eq('receiver_id', user.id)
+      .eq('read', false);
+  }, [user]);
+
   useEffect(() => {
     if (selectedUser) {
       fetchMessages(selectedUser.id);
       markMessagesAsRead(selectedUser.id);
       setIsMobileListVisible(false);
     }
-  }, [selectedUser]);
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+  }, [selectedUser, markMessagesAsRead]);
 
   const loadFriendRequests = async () => {
     if (!user) return;
@@ -213,17 +228,6 @@ export function MessagesSection({ searchQuery, onSearchQueryChange }: MessagesSe
     }
   };
 
-  const markMessagesAsRead = async (senderId: string) => {
-    if (!user) return;
-
-    await supabase
-      .from('messages')
-      .update({ read: true })
-      .eq('sender_id', senderId)
-      .eq('receiver_id', user.id)
-      .eq('read', false);
-  };
-
   const sendMessage = async () => {
     if (!newMessage.trim() || !user || !selectedUser) return;
 
@@ -240,10 +244,6 @@ export function MessagesSection({ searchQuery, onSearchQueryChange }: MessagesSe
       fetchMessages(selectedUser.id);
       await supabase.rpc('increment_points', { user_id: user.id, points: 3 });
     }
-  };
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
   const formatMessageDate = (date: string) => {

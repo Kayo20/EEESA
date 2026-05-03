@@ -1,5 +1,5 @@
 -- ============================================
--- StudentConnect Database Schema
+-- StudentConnect Database Schema (Clean Version)
 -- ============================================
 
 -- Enable UUID extension
@@ -23,10 +23,8 @@ CREATE TABLE IF NOT EXISTS profiles (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Enable RLS on profiles
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 
--- Profiles RLS Policies
 CREATE POLICY "Profiles are viewable by everyone" 
   ON profiles FOR SELECT USING (true);
 
@@ -40,8 +38,8 @@ CREATE POLICY "Users can update their own profile"
 -- POSTS TABLE
 -- ============================================
 CREATE TABLE IF NOT EXISTS posts (
-  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-  user_id UUID REFERENCES profiles(id) ON DELETE CASCADE NOT NULL,
+  id UUID NOT NULL DEFAULT uuid_generate_v4() PRIMARY KEY,
+  user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   content TEXT NOT NULL,
   image_url TEXT,
   likes_count INTEGER DEFAULT 0,
@@ -59,10 +57,8 @@ CREATE TABLE IF NOT EXISTS posts (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Enable RLS on posts
 ALTER TABLE posts ENABLE ROW LEVEL SECURITY;
 
--- Posts RLS Policies
 CREATE POLICY "Posts are viewable by everyone" 
   ON posts FOR SELECT USING (true);
 
@@ -79,17 +75,15 @@ CREATE POLICY "Users can delete their own posts"
 -- LIKES TABLE
 -- ============================================
 CREATE TABLE IF NOT EXISTS likes (
-  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-  post_id UUID REFERENCES posts(id) ON DELETE CASCADE NOT NULL,
-  user_id UUID REFERENCES profiles(id) ON DELETE CASCADE NOT NULL,
+  id UUID NOT NULL DEFAULT uuid_generate_v4() PRIMARY KEY,
+  post_id UUID NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   UNIQUE(post_id, user_id)
 );
 
--- Enable RLS on likes
 ALTER TABLE likes ENABLE ROW LEVEL SECURITY;
 
--- Likes RLS Policies
 CREATE POLICY "Likes are viewable by everyone" 
   ON likes FOR SELECT USING (true);
 
@@ -103,21 +97,20 @@ CREATE POLICY "Users can delete their own likes"
 -- COMMENTS TABLE
 -- ============================================
 CREATE TABLE IF NOT EXISTS comments (
-  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-  post_id UUID REFERENCES posts(id) ON DELETE CASCADE NOT NULL,
-  user_id UUID REFERENCES profiles(id) ON DELETE CASCADE NOT NULL,
+  id UUID NOT NULL DEFAULT uuid_generate_v4() PRIMARY KEY,
+  post_id UUID NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   content TEXT NOT NULL,
   is_edited BOOLEAN DEFAULT FALSE,
   edited_at TIMESTAMP WITH TIME ZONE,
   parent_comment_id UUID REFERENCES comments(id) ON DELETE CASCADE,
   likes_count INTEGER DEFAULT 0,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Enable RLS on comments
 ALTER TABLE comments ENABLE ROW LEVEL SECURITY;
 
--- Comments RLS Policies
 CREATE POLICY "Comments are viewable by everyone" 
   ON comments FOR SELECT USING (true);
 
@@ -134,16 +127,15 @@ CREATE POLICY "Users can delete their own comments"
 -- HASHTAGS TABLE
 -- ============================================
 CREATE TABLE IF NOT EXISTS hashtags (
-  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-  name TEXT UNIQUE NOT NULL,
+  id UUID NOT NULL DEFAULT uuid_generate_v4() PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
   post_count INTEGER DEFAULT 0,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Enable RLS on hashtags
 ALTER TABLE hashtags ENABLE ROW LEVEL SECURITY;
 
--- Hashtags RLS Policies
 CREATE POLICY "Hashtags are viewable by everyone" 
   ON hashtags FOR SELECT USING (true);
 
@@ -151,17 +143,15 @@ CREATE POLICY "Hashtags are viewable by everyone"
 -- POST HASHTAGS TABLE
 -- ============================================
 CREATE TABLE IF NOT EXISTS post_hashtags (
-  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-  post_id UUID REFERENCES posts(id) ON DELETE CASCADE NOT NULL,
-  hashtag_id UUID REFERENCES hashtags(id) ON DELETE CASCADE NOT NULL,
+  id UUID NOT NULL DEFAULT uuid_generate_v4() PRIMARY KEY,
+  post_id UUID NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  hashtag_id UUID NOT NULL REFERENCES hashtags(id) ON DELETE CASCADE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   UNIQUE(post_id, hashtag_id)
 );
 
--- Enable RLS on post_hashtags
 ALTER TABLE post_hashtags ENABLE ROW LEVEL SECURITY;
 
--- Post Hashtags RLS Policies
 CREATE POLICY "Post hashtags are viewable by everyone" 
   ON post_hashtags FOR SELECT USING (true);
 
@@ -179,17 +169,15 @@ CREATE POLICY "Post owners can delete post hashtags"
 -- COMMENT LIKES TABLE
 -- ============================================
 CREATE TABLE IF NOT EXISTS comment_likes (
-  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-  comment_id UUID REFERENCES comments(id) ON DELETE CASCADE NOT NULL,
-  user_id UUID REFERENCES profiles(id) ON DELETE CASCADE NOT NULL,
+  id UUID NOT NULL DEFAULT uuid_generate_v4() PRIMARY KEY,
+  comment_id UUID NOT NULL REFERENCES comments(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   UNIQUE(comment_id, user_id)
 );
 
--- Enable RLS on comment_likes
 ALTER TABLE comment_likes ENABLE ROW LEVEL SECURITY;
 
--- Comment Likes RLS Policies
 CREATE POLICY "Comment likes are viewable by everyone" 
   ON comment_likes FOR SELECT USING (true);
 
@@ -203,20 +191,19 @@ CREATE POLICY "Users can delete their own comment likes"
 -- POST REPORTS TABLE
 -- ============================================
 CREATE TABLE IF NOT EXISTS post_reports (
-  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-  post_id UUID REFERENCES posts(id) ON DELETE CASCADE NOT NULL,
-  reporter_id UUID REFERENCES profiles(id) ON DELETE CASCADE NOT NULL,
+  id UUID NOT NULL DEFAULT uuid_generate_v4() PRIMARY KEY,
+  post_id UUID NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  reporter_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   reason TEXT NOT NULL,
-  status TEXT CHECK (status IN ('pending', 'resolved', 'dismissed')) DEFAULT 'pending',
+  description TEXT,
+  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'reviewed', 'resolved')),
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  resolved_at TIMESTAMP WITH TIME ZONE,
-  UNIQUE(post_id, reporter_id)
+  reviewed_at TIMESTAMP WITH TIME ZONE,
+  reviewed_by UUID REFERENCES profiles(id) ON DELETE SET NULL
 );
 
--- Enable RLS on post_reports
 ALTER TABLE post_reports ENABLE ROW LEVEL SECURITY;
 
--- Post Reports RLS Policies
 CREATE POLICY "Post reports are viewable by admins" 
   ON post_reports FOR SELECT USING (auth.jwt() ->> 'role' = 'admin');
 
@@ -227,16 +214,14 @@ CREATE POLICY "Authenticated users can report posts"
 -- POST VIEWS TABLE
 -- ============================================
 CREATE TABLE IF NOT EXISTS post_views (
-  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-  post_id UUID REFERENCES posts(id) ON DELETE CASCADE NOT NULL,
-  user_id UUID REFERENCES profiles(id) ON DELETE CASCADE NOT NULL,
+  id UUID NOT NULL DEFAULT uuid_generate_v4() PRIMARY KEY,
+  post_id UUID NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   viewed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Enable RLS on post_views
 ALTER TABLE post_views ENABLE ROW LEVEL SECURITY;
 
--- Post Views RLS Policies
 CREATE POLICY "Post views are viewable by everyone" 
   ON post_views FOR SELECT USING (true);
 
@@ -247,20 +232,18 @@ CREATE POLICY "Authenticated users can view posts"
 -- STUDY GROUPS TABLE
 -- ============================================
 CREATE TABLE IF NOT EXISTS study_groups (
-  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  id UUID NOT NULL DEFAULT uuid_generate_v4() PRIMARY KEY,
   name TEXT NOT NULL,
   description TEXT,
   subject TEXT NOT NULL,
-  max_members INTEGER DEFAULT 50,
-  created_by UUID REFERENCES profiles(id) ON DELETE CASCADE NOT NULL,
+  max_members INTEGER DEFAULT 20,
+  created_by UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Enable RLS on study_groups
 ALTER TABLE study_groups ENABLE ROW LEVEL SECURITY;
 
--- Study Groups RLS Policies
 CREATE POLICY "Study groups are viewable by everyone" 
   ON study_groups FOR SELECT USING (true);
 
@@ -277,18 +260,15 @@ CREATE POLICY "Creators can delete their study groups"
 -- GROUP MEMBERS TABLE
 -- ============================================
 CREATE TABLE IF NOT EXISTS group_members (
-  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-  group_id UUID REFERENCES study_groups(id) ON DELETE CASCADE NOT NULL,
-  user_id UUID REFERENCES profiles(id) ON DELETE CASCADE NOT NULL,
-  role TEXT CHECK (role IN ('member', 'admin')) DEFAULT 'member',
+  id UUID NOT NULL DEFAULT uuid_generate_v4() PRIMARY KEY,
+  group_id UUID NOT NULL REFERENCES study_groups(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   joined_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   UNIQUE(group_id, user_id)
 );
 
--- Enable RLS on group_members
 ALTER TABLE group_members ENABLE ROW LEVEL SECURITY;
 
--- Group Members RLS Policies
 CREATE POLICY "Group members are viewable by everyone" 
   ON group_members FOR SELECT USING (true);
 
@@ -298,35 +278,22 @@ CREATE POLICY "Authenticated users can join groups"
 CREATE POLICY "Users can leave groups" 
   ON group_members FOR DELETE USING (auth.uid() = user_id);
 
-CREATE POLICY "Group admins can manage members" 
-  ON group_members FOR UPDATE USING (
-    auth.uid() IN (
-      SELECT user_id FROM group_members 
-      WHERE group_id = group_members.group_id 
-      AND role = 'admin'
-    )
-  );
-
 -- ============================================
 -- EVENTS TABLE
 -- ============================================
 CREATE TABLE IF NOT EXISTS events (
-  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  id UUID NOT NULL DEFAULT uuid_generate_v4() PRIMARY KEY,
   title TEXT NOT NULL,
   description TEXT,
   location TEXT,
-  start_time TIMESTAMP WITH TIME ZONE NOT NULL,
-  end_time TIMESTAMP WITH TIME ZONE,
-  max_attendees INTEGER,
-  created_by UUID REFERENCES profiles(id) ON DELETE CASCADE NOT NULL,
+  event_date TIMESTAMP WITH TIME ZONE NOT NULL,
+  created_by UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Enable RLS on events
 ALTER TABLE events ENABLE ROW LEVEL SECURITY;
 
--- Events RLS Policies
 CREATE POLICY "Events are viewable by everyone" 
   ON events FOR SELECT USING (true);
 
@@ -343,18 +310,16 @@ CREATE POLICY "Creators can delete their events"
 -- EVENT ATTENDEES TABLE
 -- ============================================
 CREATE TABLE IF NOT EXISTS event_attendees (
-  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-  event_id UUID REFERENCES events(id) ON DELETE CASCADE NOT NULL,
-  user_id UUID REFERENCES profiles(id) ON DELETE CASCADE NOT NULL,
-  status TEXT CHECK (status IN ('going', 'maybe', 'not_going')) DEFAULT 'going',
+  id UUID NOT NULL DEFAULT uuid_generate_v4() PRIMARY KEY,
+  event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  status TEXT DEFAULT 'going' CHECK (status IN ('going', 'maybe', 'not_going')),
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   UNIQUE(event_id, user_id)
 );
 
--- Enable RLS on event_attendees
 ALTER TABLE event_attendees ENABLE ROW LEVEL SECURITY;
 
--- Event Attendees RLS Policies
 CREATE POLICY "Event attendees are viewable by everyone" 
   ON event_attendees FOR SELECT USING (true);
 
@@ -371,18 +336,16 @@ CREATE POLICY "Users can cancel their RSVP"
 -- MESSAGES TABLE
 -- ============================================
 CREATE TABLE IF NOT EXISTS messages (
-  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-  sender_id UUID REFERENCES profiles(id) ON DELETE CASCADE NOT NULL,
-  receiver_id UUID REFERENCES profiles(id) ON DELETE CASCADE NOT NULL,
+  id UUID NOT NULL DEFAULT uuid_generate_v4() PRIMARY KEY,
+  sender_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  receiver_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   content TEXT NOT NULL,
   read BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Enable RLS on messages
 ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
 
--- Messages RLS Policies
 CREATE POLICY "Users can view messages they're involved in" 
   ON messages FOR SELECT USING (auth.uid() = sender_id OR auth.uid() = receiver_id);
 
@@ -396,10 +359,10 @@ CREATE POLICY "Receivers can mark messages as read"
 -- FRIEND REQUESTS TABLE
 -- ============================================
 CREATE TABLE IF NOT EXISTS friend_requests (
-  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-  sender_id UUID REFERENCES profiles(id) ON DELETE CASCADE NOT NULL,
-  receiver_id UUID REFERENCES profiles(id) ON DELETE CASCADE NOT NULL,
-  status TEXT CHECK (status IN ('pending', 'accepted', 'rejected')) DEFAULT 'pending',
+  id UUID NOT NULL DEFAULT uuid_generate_v4() PRIMARY KEY,
+  sender_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  receiver_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'rejected')),
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -421,7 +384,7 @@ CREATE POLICY "Sender can cancel friend requests"
 -- BADGES TABLE
 -- ============================================
 CREATE TABLE IF NOT EXISTS badges (
-  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  id UUID NOT NULL DEFAULT uuid_generate_v4() PRIMARY KEY,
   name TEXT NOT NULL,
   description TEXT NOT NULL,
   icon TEXT NOT NULL,
@@ -429,10 +392,8 @@ CREATE TABLE IF NOT EXISTS badges (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Enable RLS on badges
 ALTER TABLE badges ENABLE ROW LEVEL SECURITY;
 
--- Badges RLS Policies
 CREATE POLICY "Badges are viewable by everyone" 
   ON badges FOR SELECT USING (true);
 
@@ -440,17 +401,15 @@ CREATE POLICY "Badges are viewable by everyone"
 -- USER BADGES TABLE
 -- ============================================
 CREATE TABLE IF NOT EXISTS user_badges (
-  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-  user_id UUID REFERENCES profiles(id) ON DELETE CASCADE NOT NULL,
-  badge_id UUID REFERENCES badges(id) ON DELETE CASCADE NOT NULL,
+  id UUID NOT NULL DEFAULT uuid_generate_v4() PRIMARY KEY,
+  user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  badge_id UUID NOT NULL REFERENCES badges(id) ON DELETE CASCADE,
   earned_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   UNIQUE(user_id, badge_id)
 );
 
--- Enable RLS on user_badges
 ALTER TABLE user_badges ENABLE ROW LEVEL SECURITY;
 
--- User Badges RLS Policies
 CREATE POLICY "User badges are viewable by everyone" 
   ON user_badges FOR SELECT USING (true);
 
@@ -458,21 +417,19 @@ CREATE POLICY "User badges are viewable by everyone"
 -- RESOURCES TABLE
 -- ============================================
 CREATE TABLE IF NOT EXISTS resources (
-  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  id UUID NOT NULL DEFAULT uuid_generate_v4() PRIMARY KEY,
   title TEXT NOT NULL,
   description TEXT,
   file_url TEXT,
   subject TEXT NOT NULL,
-  uploaded_by UUID REFERENCES profiles(id) ON DELETE CASCADE NOT NULL,
+  uploaded_by UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   downloads_count INTEGER DEFAULT 0,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Enable RLS on resources
 ALTER TABLE resources ENABLE ROW LEVEL SECURITY;
 
--- Resources RLS Policies
 CREATE POLICY "Resources are viewable by everyone" 
   ON resources FOR SELECT USING (true);
 
@@ -488,13 +445,10 @@ CREATE POLICY "Uploaders can delete their resources"
 -- ============================================
 -- STORAGE BUCKETS
 -- ============================================
-
--- Create images bucket for post images
 INSERT INTO storage.buckets (id, name, public)
 VALUES ('images', 'images', true)
 ON CONFLICT (id) DO NOTHING;
 
--- Storage policies for images bucket
 CREATE POLICY "Images are publicly accessible" 
   ON storage.objects FOR SELECT USING (bucket_id = 'images');
 
@@ -517,283 +471,8 @@ CREATE POLICY "Users can delete their own images"
   );
 
 -- ============================================
--- FUNCTIONS
+-- FUNCTIONS & TRIGGERS
 -- ============================================
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
--- Enable RLS on comments
-ALTER TABLE comments ENABLE ROW LEVEL SECURITY;
-
--- Comments RLS Policies
-CREATE POLICY "Comments are viewable by everyone" 
-  ON comments FOR SELECT USING (true);
-
-CREATE POLICY "Authenticated users can create comments" 
-  ON comments FOR INSERT WITH CHECK (auth.uid() = user_id);
-
-CREATE POLICY "Users can update their own comments" 
-  ON comments FOR UPDATE USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can delete their own comments" 
-  ON comments FOR DELETE USING (auth.uid() = user_id);
-
--- ============================================
--- STUDY GROUPS TABLE
--- ============================================
-CREATE TABLE IF NOT EXISTS study_groups (
-  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-  name TEXT NOT NULL,
-  description TEXT,
-  subject TEXT NOT NULL,
-  max_members INTEGER DEFAULT 20,
-  created_by UUID REFERENCES profiles(id) ON DELETE CASCADE NOT NULL,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
--- Enable RLS on study_groups
-ALTER TABLE study_groups ENABLE ROW LEVEL SECURITY;
-
--- Study Groups RLS Policies
-CREATE POLICY "Study groups are viewable by everyone" 
-  ON study_groups FOR SELECT USING (true);
-
-CREATE POLICY "Authenticated users can create study groups" 
-  ON study_groups FOR INSERT WITH CHECK (auth.uid() = created_by);
-
-CREATE POLICY "Creators can update their study groups" 
-  ON study_groups FOR UPDATE USING (auth.uid() = created_by);
-
-CREATE POLICY "Creators can delete their study groups" 
-  ON study_groups FOR DELETE USING (auth.uid() = created_by);
-
--- ============================================
--- GROUP MEMBERS TABLE
--- ============================================
-CREATE TABLE IF NOT EXISTS group_members (
-  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-  group_id UUID REFERENCES study_groups(id) ON DELETE CASCADE NOT NULL,
-  user_id UUID REFERENCES profiles(id) ON DELETE CASCADE NOT NULL,
-  joined_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  UNIQUE(group_id, user_id)
-);
-
--- Enable RLS on group_members
-ALTER TABLE group_members ENABLE ROW LEVEL SECURITY;
-
--- Group Members RLS Policies
-CREATE POLICY "Group members are viewable by everyone" 
-  ON group_members FOR SELECT USING (true);
-
-CREATE POLICY "Authenticated users can join groups" 
-  ON group_members FOR INSERT WITH CHECK (auth.uid() = user_id);
-
-CREATE POLICY "Users can leave groups" 
-  ON group_members FOR DELETE USING (auth.uid() = user_id);
-
--- ============================================
--- EVENTS TABLE
--- ============================================
-CREATE TABLE IF NOT EXISTS events (
-  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-  title TEXT NOT NULL,
-  description TEXT,
-  location TEXT,
-  event_date TIMESTAMP WITH TIME ZONE NOT NULL,
-  created_by UUID REFERENCES profiles(id) ON DELETE CASCADE NOT NULL,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
--- Enable RLS on events
-ALTER TABLE events ENABLE ROW LEVEL SECURITY;
-
--- Events RLS Policies
-CREATE POLICY "Events are viewable by everyone" 
-  ON events FOR SELECT USING (true);
-
-CREATE POLICY "Authenticated users can create events" 
-  ON events FOR INSERT WITH CHECK (auth.uid() = created_by);
-
-CREATE POLICY "Creators can update their events" 
-  ON events FOR UPDATE USING (auth.uid() = created_by);
-
-CREATE POLICY "Creators can delete their events" 
-  ON events FOR DELETE USING (auth.uid() = created_by);
-
--- ============================================
--- EVENT ATTENDEES TABLE
--- ============================================
-CREATE TABLE IF NOT EXISTS event_attendees (
-  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-  event_id UUID REFERENCES events(id) ON DELETE CASCADE NOT NULL,
-  user_id UUID REFERENCES profiles(id) ON DELETE CASCADE NOT NULL,
-  status TEXT CHECK (status IN ('going', 'maybe', 'not_going')) DEFAULT 'going',
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  UNIQUE(event_id, user_id)
-);
-
--- Enable RLS on event_attendees
-ALTER TABLE event_attendees ENABLE ROW LEVEL SECURITY;
-
--- Event Attendees RLS Policies
-CREATE POLICY "Event attendees are viewable by everyone" 
-  ON event_attendees FOR SELECT USING (true);
-
-CREATE POLICY "Authenticated users can RSVP" 
-  ON event_attendees FOR INSERT WITH CHECK (auth.uid() = user_id);
-
-CREATE POLICY "Users can update their RSVP" 
-  ON event_attendees FOR UPDATE USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can cancel their RSVP" 
-  ON event_attendees FOR DELETE USING (auth.uid() = user_id);
-
--- ============================================
--- MESSAGES TABLE
--- ============================================
-CREATE TABLE IF NOT EXISTS messages (
-  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-  sender_id UUID REFERENCES profiles(id) ON DELETE CASCADE NOT NULL,
-  receiver_id UUID REFERENCES profiles(id) ON DELETE CASCADE NOT NULL,
-  content TEXT NOT NULL,
-  read BOOLEAN DEFAULT FALSE,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
--- Enable RLS on messages
-ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
-
--- Messages RLS Policies
-CREATE POLICY "Users can view messages they're involved in" 
-  ON messages FOR SELECT USING (auth.uid() = sender_id OR auth.uid() = receiver_id);
-
-CREATE POLICY "Authenticated users can send messages" 
-  ON messages FOR INSERT WITH CHECK (auth.uid() = sender_id);
-
-CREATE POLICY "Receivers can mark messages as read" 
-  ON messages FOR UPDATE USING (auth.uid() = receiver_id);
-
--- ============================================
--- FRIEND REQUESTS TABLE
--- ============================================
-CREATE TABLE IF NOT EXISTS friend_requests (
-  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-  sender_id UUID REFERENCES profiles(id) ON DELETE CASCADE NOT NULL,
-  receiver_id UUID REFERENCES profiles(id) ON DELETE CASCADE NOT NULL,
-  status TEXT CHECK (status IN ('pending', 'accepted', 'rejected')) DEFAULT 'pending',
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
-ALTER TABLE friend_requests ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Friend requests are viewable by sender or receiver"
-  ON friend_requests FOR SELECT USING (auth.uid() = sender_id OR auth.uid() = receiver_id);
-
-CREATE POLICY "Authenticated users can send friend requests"
-  ON friend_requests FOR INSERT WITH CHECK (auth.uid() = sender_id);
-
-CREATE POLICY "Receiver can respond to friend requests"
-  ON friend_requests FOR UPDATE USING (auth.uid() = receiver_id);
-
-CREATE POLICY "Sender can cancel friend requests"
-  ON friend_requests FOR DELETE USING (auth.uid() = sender_id);
-
--- ============================================
--- BADGES TABLE
--- ============================================
-CREATE TABLE IF NOT EXISTS badges (
-  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-  name TEXT NOT NULL,
-  description TEXT NOT NULL,
-  icon TEXT NOT NULL,
-  points_required INTEGER NOT NULL,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
--- Enable RLS on badges
-ALTER TABLE badges ENABLE ROW LEVEL SECURITY;
-
--- Badges RLS Policies
-CREATE POLICY "Badges are viewable by everyone" 
-  ON badges FOR SELECT USING (true);
-
--- ============================================
--- USER BADGES TABLE
--- ============================================
-CREATE TABLE IF NOT EXISTS user_badges (
-  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-  user_id UUID REFERENCES profiles(id) ON DELETE CASCADE NOT NULL,
-  badge_id UUID REFERENCES badges(id) ON DELETE CASCADE NOT NULL,
-  earned_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  UNIQUE(user_id, badge_id)
-);
-
--- Enable RLS on user_badges
-ALTER TABLE user_badges ENABLE ROW LEVEL SECURITY;
-
--- User Badges RLS Policies
-CREATE POLICY "User badges are viewable by everyone" 
-  ON user_badges FOR SELECT USING (true);
-
--- ============================================
--- RESOURCES TABLE
--- ============================================
-CREATE TABLE IF NOT EXISTS resources (
-  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-  title TEXT NOT NULL,
-  description TEXT,
-  file_url TEXT,
-  subject TEXT NOT NULL,
-  uploaded_by UUID REFERENCES profiles(id) ON DELETE CASCADE NOT NULL,
-  downloads_count INTEGER DEFAULT 0,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
--- Enable RLS on resources
-ALTER TABLE resources ENABLE ROW LEVEL SECURITY;
-
--- Resources RLS Policies
-CREATE POLICY "Resources are viewable by everyone" 
-  ON resources FOR SELECT USING (true);
-
-CREATE POLICY "Authenticated users can upload resources" 
-  ON resources FOR INSERT WITH CHECK (auth.uid() = uploaded_by);
-
-CREATE POLICY "Uploaders can update their resources" 
-  ON resources FOR UPDATE USING (auth.uid() = uploaded_by);
-
-CREATE POLICY "Uploaders can delete their resources" 
-  ON resources FOR DELETE USING (auth.uid() = uploaded_by);
-
--- ============================================
--- FUNCTIONS
--- ============================================
-
--- Function to increment points
-CREATE OR REPLACE FUNCTION increment_points(user_id UUID, points_to_add INTEGER)
-RETURNS VOID AS $$
-BEGIN
-  UPDATE profiles 
-  SET points = points + points_to_add 
-  WHERE id = user_id;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-
--- Function to increment downloads
-CREATE OR REPLACE FUNCTION increment_downloads(resource_id UUID)
-RETURNS VOID AS $$
-BEGIN
-  UPDATE resources 
-  SET downloads_count = downloads_count + 1 
-  WHERE id = resource_id;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-
--- Function to update post likes count
 CREATE OR REPLACE FUNCTION update_post_likes_count()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -806,14 +485,12 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Trigger for likes count
 DROP TRIGGER IF EXISTS update_likes_count ON likes;
 CREATE TRIGGER update_likes_count
   AFTER INSERT OR DELETE ON likes
   FOR EACH ROW
   EXECUTE FUNCTION update_post_likes_count();
 
--- Function to update post comments count
 CREATE OR REPLACE FUNCTION update_post_comments_count()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -826,7 +503,6 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Trigger for comments count
 DROP TRIGGER IF EXISTS update_comments_count ON comments;
 CREATE TRIGGER update_comments_count
   AFTER INSERT OR DELETE ON comments
@@ -834,7 +510,7 @@ CREATE TRIGGER update_comments_count
   EXECUTE FUNCTION update_post_comments_count();
 
 -- ============================================
--- INSERT SAMPLE BADGES
+-- SAMPLE DATA
 -- ============================================
 INSERT INTO badges (name, description, icon, points_required) VALUES
   ('Newcomer', 'Joined StudentConnect', 'star', 0),
@@ -850,7 +526,6 @@ ON CONFLICT DO NOTHING;
 -- ============================================
 -- REALTIME SUBSCRIPTIONS
 -- ============================================
--- Enable realtime for all tables
 ALTER PUBLICATION supabase_realtime ADD TABLE posts;
 ALTER PUBLICATION supabase_realtime ADD TABLE likes;
 ALTER PUBLICATION supabase_realtime ADD TABLE comments;

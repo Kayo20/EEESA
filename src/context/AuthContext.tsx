@@ -9,7 +9,7 @@ interface AuthContextType {
   profile: Profile | null;
   isLoading: boolean;
   signIn: (email: string, password: string) => Promise<{ error: AuthError | null }>;
-  signUp: (email: string, password: string, username: string, fullName: string) => Promise<{ error: AuthError | null; requiresEmailConfirmation: boolean }>;
+  signUp: (email: string, password: string, username: string, fullName: string) => Promise<{ error: AuthError | null }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 }
@@ -82,7 +82,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  async function signUp(email: string, password: string, username: string, fullName: string): Promise<{ error: AuthError | null; requiresEmailConfirmation: boolean }> {
+  async function signUp(email: string, password: string, username: string, fullName: string): Promise<{ error: AuthError | null }> {
     try {
       // Step 1: Create auth user
       const { data: authData, error: signUpError } = await supabase.auth.signUp({
@@ -98,11 +98,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (signUpError) {
         console.error('Signup error:', signUpError);
-        return { error: signUpError, requiresEmailConfirmation: false };
+        return { error: signUpError };
       }
 
       if (!authData.user) {
-        return { error: { message: 'User creation failed' } as AuthError, requiresEmailConfirmation: false };
+        return { error: { message: 'User creation failed' } as AuthError };
       }
 
       // If the user is auto-signed in, update local state.
@@ -130,11 +130,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Continue - profile can be created later
       }
 
-      const requiresEmailConfirmation = !authData.session?.user;
-      return { error: null, requiresEmailConfirmation };
+      // Email confirmation is disabled
+      return { error: null };
     } catch (err: any) {
       console.error('Sign up exception:', err);
-      return { error: err, requiresEmailConfirmation: false };
+      return { error: err };
     }
   }
 
