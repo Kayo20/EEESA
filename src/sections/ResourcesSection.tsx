@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type MouseEvent } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   BookOpen, 
@@ -95,13 +95,22 @@ export function ResourcesSection() {
     }
   };
 
-  const downloadResource = async (resourceId: string) => {
-    await supabase
-      .from('resources')
-      .update({ downloads_count: supabase.rpc('increment_downloads', { resource_id: resourceId }) })
-      .eq('id', resourceId);
+  const downloadResource = async (event: MouseEvent<HTMLAnchorElement>, resource: Resource) => {
+    event.preventDefault();
+
+    if (!resource?.id || !resource?.file_url) return;
+
+    const { error } = await supabase.rpc('increment_downloads', {
+      resource_id: resource.id,
+    });
+
+    if (error) {
+      console.error('Download count update failed:', error);
+      return;
+    }
 
     fetchResources();
+    window.open(resource.file_url, '_blank');
   };
 
   const getFileType = (url: string): string => {
@@ -250,7 +259,7 @@ export function ResourcesSection() {
                       href={resource.file_url || '#'}
                       target="_blank"
                       rel="noopener noreferrer"
-                      onClick={() => downloadResource(resource.id)}
+                      onClick={(event) => downloadResource(event, resource)}
                       className="flex-1 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl font-medium text-center flex items-center justify-center gap-2"
                       whileHover={{ scale: 1.02 }}
                       whileTap={{ scale: 0.98 }}

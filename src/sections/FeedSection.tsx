@@ -89,7 +89,12 @@ export function FeedSection() {
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [dbError, setDbError] = useState(false);
+  const [storageAvailable, setStorageAvailable] = useState<boolean | null>(null);
+  const [storageError, setStorageError] = useState<string | null>(null);
+  const [storageBucketIds, setStorageBucketIds] = useState<string | null>(null);
+  const [lastUploadError, setLastUploadError] = useState<string | null>(null);
   const [commentingOn, setCommentingOn] = useState<string | null>(null);
+  const [openMenuPostId, setOpenMenuPostId] = useState<string | null>(null);
   const [commentContent, setCommentContent] = useState('');
   const [editingPost, setEditingPost] = useState<string | null>(null);
   const [editContent, setEditContent] = useState('');
@@ -104,6 +109,64 @@ export function FeedSection() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const observerRef = useRef<IntersectionObserver | null>(null);
   const lastPostRef = useRef<HTMLDivElement>(null);
+
+  // Debug: Test storage bucket access
+  useEffect(() => {
+    const testStorage = async () => {
+      setStorageError(null);
+      setLastUploadError(null);
+      setStorageAvailable(null);
+
+      try {
+        console.log('🔍 Testing storage connection...');
+        console.log('Supabase URL:', import.meta.env.VITE_SUPABASE_URL);
+        console.log('Supabase Key configured:', !!import.meta.env.VITE_SUPABASE_ANON_KEY);
+
+        const { data, error } = await supabase.storage.listBuckets();
+        if (error) {
+          console.error('❌ Storage test failed:', error);
+          console.error('Error details:', {
+            message: error.message,
+            statusCode: error.statusCode
+          });
+          setStorageAvailable(false);
+          setStorageBucketIds(null);
+          setStorageError(`Storage access failed: ${error.message}`);
+          return;
+        }
+
+        const bucketIds = data?.map((b) => b.id).join(', ') || 'none';
+        console.log('✅ Available buckets:', data);
+        setStorageBucketIds(bucketIds);
+        const imagesBucket = data.find(b => b.id === 'images');
+        if (imagesBucket) {
+          console.log('✅ Images bucket found:', imagesBucket);
+        } else {
+          console.warn('⚠️ Images bucket not visible via listBuckets. This may be due to list permissions, but upload may still work.');
+        }
+        setStorageAvailable(true);
+        setStorageError(null);
+      } catch (err: any) {
+        console.error('❌ Storage test exception:', err);
+        setStorageAvailable(false);
+        setStorageError(`Storage test failed: ${err?.message || String(err)}`);
+      }
+    };
+
+    testStorage();
+  }, [user]);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (!target.closest('[data-post-menu]')) {
+        setOpenMenuPostId(null);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // Intersection Observer for infinite scroll
   useEffect(() => {
@@ -122,26 +185,15 @@ export function FeedSection() {
   }, [hasMore]);
 
   useEffect(() => {
-    fetchPosts();
-    fetchHashtags();
-
-    // Subscribe to new posts
-    const subscription = supabase
-      .channel('posts')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'posts' }, () => {
-        fetchPosts();
-      })
-      .subscribe();
-
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, [profile?.id]);
-
-  useEffect(() => {
     // Filter posts based on search and filters
     filterPosts();
   }, [allPosts, searchQuery, filterBy, selectedHashtag]);
+
+  useEffect(() => {
+    // Initial fetch of feed data when profile or filter type changes
+    fetchPosts();
+    fetchHashtags();
+  }, [profile?.id, filterBy]);
 
   const fetchFriendIds = async (): Promise<string[]> => {
     if (!profile?.id) return [];
@@ -168,7 +220,7 @@ export function FeedSection() {
       }
 
       const visibleUserIds = profile ? [profile.id, ...(await fetchFriendIds())] : [];
-      const from = loadMore ? (page - 1) * 10 : 0;
+      const from = loadMore ? page * 10 : 0;
       const to = from + 9;
 
       let query = supabase
@@ -285,45 +337,116 @@ export function FeedSection() {
   const uploadImage = async (file: File): Promise<string | null> => {
     try {
       setUploadingImage(true);
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${user?.id}_${Date.now()}.${fileExt}`;
-      const filePath = `posts/${fileName}`;
+
+      // Debug: Check authentication
+      if (!user?.id) {
+        console.error('❌ Upload failed: User not authenticated');
+        throw new Error('User not authenticated');
+      }
+
+      if (storageAvailable === false) {
+        const message = storageError || 'Storage bucket unavailable';
+        console.error('❌ Upload failed:', message);
+        alert(`Upload failed: ${message}`);
+        throw new Error(message);
+      }
+
+      console.log('🚀 Starting upload for user:', user.id);
+      console.log('📁 File details:', {
+        name: file.name,
+        size: file.size,
+        type: file.type
+      });
+
+      const fileExt = file.name.split('.').pop() || 'png';
+      const fileName = `${Date.now()}.${fileExt}`;
+      const filePath = `${user.id}/${fileName}`;
+
+      console.log('📂 Upload path:', filePath);
 
       const { error: uploadError } = await supabase.storage
         .from('images')
         .upload(filePath, file);
 
-      if (uploadError) throw uploadError;
+      if (uploadError) {
+        console.error('❌ Supabase upload error:', uploadError);
+        console.error('Error details:', {
+          message: uploadError.message,
+          statusCode: uploadError.statusCode
+        });
 
-      const { data } = supabase.storage
+        // If bucket doesn't exist, try to provide helpful error
+        if (uploadError.message?.includes('bucket') || uploadError.message?.includes('not found')) {
+          alert(`Upload failed: Storage bucket "images" not found. Please create it in your Supabase dashboard under Storage.`);
+        } else {
+          alert(`Upload failed: ${uploadError.message}`);
+        }
+        throw uploadError;
+      }
+
+      console.log('✅ Upload successful, getting public URL...');
+
+      const publicResponse = supabase.storage
         .from('images')
         .getPublicUrl(filePath);
 
-      return data.publicUrl;
-    } catch (error) {
-      console.error('Image upload error:', error);
-      return null;
-    } finally {
-      setUploadingImage(false);
-    }
-  };
+      if (publicResponse.data?.publicUrl) {
+        console.log('✅ Public URL:', publicResponse.data.publicUrl);
+        return publicResponse.data.publicUrl;
+      }
 
+      // Fallback: create a signed URL if public access is not available
+      console.log('⚠️ Public URL not available, trying signed URL...');
+      const { data: signedData, error: signedUrlError } = await supabase.storage
+        .from('images')
+        .createSignedUrl(filePath, 60 * 60 * 24); // 24 hours
+
+      if (signedUrlError) {
+        console.error('❌ Signed URL error:', signedUrlError);
+        throw signedUrlError;
+      }
+
+      if (signedData?.signedUrl) {
+        console.log('✅ Fallback signed URL:', signedData.signedUrl);
+        return signedData.signedUrl;
+      }
+
+      console.error('❌ Failed to get any URL for uploaded image');
+      throw new Error('Failed to get URL for uploaded image');
+    } catch (error: any) {
+        console.error('❌ Image upload error:', error);
+        const message = error?.message || String(error || 'Unknown error');
+        setLastUploadError(message);
+        // Don't show duplicate error if we already showed one
+        if (!message.includes('not authenticated') && !message.includes('bucket')) {
+          alert(`Upload failed: ${message}`);
+        }
+        return null;
+      } finally {
+        setUploadingImage(false);
+      }
+    };
   const createPost = async () => {
     if (!newPostContent.trim() || !user) {
       alert('Please sign in to create posts');
       return;
     }
 
+    console.log('Creating post for user:', user.id, user.email);
+
     try {
       let imageUrl = null;
       if (selectedImage) {
+        console.log('Uploading image...');
         imageUrl = await uploadImage(selectedImage);
         if (!imageUrl) {
           alert('Failed to upload image. Please try again.');
           return;
         }
+        console.log('Image uploaded successfully:', imageUrl);
       }
 
+      console.log('Inserting post into database...');
       const { error } = await supabase.from('posts').insert({
         user_id: user.id,
         content: newPostContent,
@@ -336,6 +459,7 @@ export function FeedSection() {
         return;
       }
 
+      console.log('Post created successfully');
       setNewPostContent('');
       setSelectedImage(null);
       setImagePreview(null);
@@ -573,6 +697,127 @@ export function FeedSection() {
         </FadeIn>
       )}
 
+      {storageError && (
+        <FadeIn>
+          <div className="mb-6 p-4 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
+            <div className="flex items-start gap-3">
+              <Database className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <p className="font-medium text-red-800 dark:text-red-300">Storage bucket issue</p>
+                <p className="text-sm text-red-700 dark:text-red-400 mt-1">
+                  {storageError}
+                </p>
+                <p className="text-xs text-red-600 dark:text-red-500 mt-2">
+                  Connected to: {import.meta.env.VITE_SUPABASE_URL}
+                </p>
+                {storageBucketIds && (
+                  <p className="text-xs text-slate-600 dark:text-slate-400 mt-2">
+                    Available buckets: {storageBucketIds}
+                  </p>
+                )}
+                {lastUploadError && (
+                  <p className="text-xs text-red-700 dark:text-red-300 mt-2 whitespace-pre-wrap">
+                    Last upload error: {lastUploadError}
+                  </p>
+                )}
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    onClick={() => window.location.reload()}
+                    className="px-3 py-1 text-xs bg-red-100 dark:bg-red-800 text-red-700 dark:text-red-300 rounded hover:bg-red-200 dark:hover:bg-red-700 transition-colors"
+                  >
+                    Reload Page
+                  </button>
+                  <button
+                    onClick={async () => {
+                      try {
+                        console.log('🔄 Manual storage check...');
+                        const { data, error } = await supabase.storage.listBuckets();
+                        if (error) {
+                          console.error('Manual check failed:', error);
+                          setStorageBucketIds(null);
+                          setStorageError(`Storage access failed: ${error.message}`);
+                        } else {
+                          const bucketIds = data?.map((b) => b.id).join(', ') || 'none';
+                          console.log('Manual check buckets:', data);
+                          setStorageBucketIds(bucketIds);
+                          const imagesBucket = data.find(b => b.id === 'images');
+                          if (imagesBucket) {
+                            setStorageAvailable(true);
+                            setStorageError(null);
+                            console.log('✅ Manual check: Images bucket found');
+                          } else {
+                            setStorageAvailable(true);
+                            setStorageError(null);
+                            console.warn('⚠️ Manual check: Images bucket not visible via listBuckets. This may be due to permissions, but upload may still work.');
+                          }
+                        }
+                      } catch (err: any) {
+                        setStorageError(`Manual check failed: ${err?.message || String(err)}`);
+                      }
+                    }}
+                    className="px-3 py-1 text-xs bg-blue-100 dark:bg-blue-800 text-blue-700 dark:text-blue-300 rounded hover:bg-blue-200 dark:hover:bg-blue-700 transition-colors"
+                  >
+                    Check Again
+                  </button>
+                  <button
+                    onClick={async () => {
+                      console.log('🔍 Full Debug Info:');
+                      console.log('Supabase URL:', import.meta.env.VITE_SUPABASE_URL);
+                      console.log('User authenticated:', !!user);
+                      console.log('User ID:', user?.id);
+                      console.log('User email:', user?.email);
+
+                      try {
+                        const { data: session } = await supabase.auth.getSession();
+                        console.log('Session exists:', !!session?.session);
+                        console.log('Session user:', session?.session?.user?.id);
+
+                        const { data: buckets, error: bucketError } = await supabase.storage.listBuckets();
+                        if (bucketError) {
+                          console.error('Bucket list error:', bucketError);
+                        } else {
+                          console.log('All buckets:', buckets);
+                          const imagesBucket = buckets.find(b => b.id === 'images');
+                          console.log('Images bucket exists:', !!imagesBucket);
+                          if (imagesBucket) {
+                            console.log('Images bucket details:', imagesBucket);
+                          }
+                        }
+
+                        // Try a test upload to see what happens
+                        const testFile = new File(['test'], 'test.txt', { type: 'text/plain' });
+                        const testPath = `${user?.id || 'test'}/debug-test.txt`;
+                        console.log('Testing upload to path:', testPath);
+
+                        const { error: testUploadError } = await supabase.storage
+                          .from('images')
+                          .upload(testPath, testFile);
+
+                        if (testUploadError) {
+                          console.error('Test upload failed:', testUploadError);
+                        } else {
+                          console.log('✅ Test upload succeeded');
+                          // Clean up test file
+                          await supabase.storage.from('images').remove([testPath]);
+                        }
+
+                      } catch (err: any) {
+                        console.error('Debug check failed:', err);
+                      }
+
+                      alert('Debug info logged to console. Press F12 to view.');
+                    }}
+                    className="px-3 py-1 text-xs bg-purple-100 dark:bg-purple-800 text-purple-700 dark:text-purple-300 rounded hover:bg-purple-200 dark:hover:bg-purple-700 transition-colors"
+                  >
+                    Debug
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </FadeIn>
+      )}
+
       {/* Search and Filters */}
       <FadeIn>
         <div className="mb-6 space-y-4">
@@ -778,18 +1023,24 @@ export function FeedSection() {
                   </div>
 
                   {/* Post Actions Menu */}
-                  <div className="relative">
+                  <div className="relative" data-post-menu>
                     <HoverScale>
-                      <button className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400 transition-colors">
+                      <button
+                        onClick={() => setOpenMenuPostId(openMenuPostId === post.id ? null : post.id)}
+                        className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400 transition-colors"
+                        aria-expanded={openMenuPostId === post.id}
+                        aria-controls={`post-menu-${post.id}`}
+                      >
                         <MoreHorizontal className="w-5 h-5" />
                       </button>
                     </HoverScale>
 
-                    {/* Dropdown Menu - Simplified for now */}
-                    {post.user_id === user?.id && (
-                      <div className="absolute right-0 top-12 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg py-2 min-w-32">
+                    {/* Dropdown Menu */}
+                    {openMenuPostId === post.id && post.user_id === user?.id && (
+                      <div id={`post-menu-${post.id}`} className="absolute right-0 top-12 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg py-2 min-w-32">
                         <button
                           onClick={() => {
+                            setOpenMenuPostId(null);
                             setEditingPost(post.id);
                             setEditContent(post.content);
                           }}
@@ -799,7 +1050,10 @@ export function FeedSection() {
                           Edit
                         </button>
                         <button
-                          onClick={() => deletePost(post.id)}
+                          onClick={() => {
+                            setOpenMenuPostId(null);
+                            deletePost(post.id);
+                          }}
                           className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center gap-2"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -808,10 +1062,13 @@ export function FeedSection() {
                       </div>
                     )}
 
-                    {post.user_id !== user?.id && (
-                      <div className="absolute right-0 top-12 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg py-2 min-w-32">
+                    {openMenuPostId === post.id && post.user_id !== user?.id && (
+                      <div id={`post-menu-${post.id}`} className="absolute right-0 top-12 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg py-2 min-w-32">
                         <button
-                          onClick={() => reportPost(post.id)}
+                          onClick={() => {
+                            setOpenMenuPostId(null);
+                            reportPost(post.id);
+                          }}
                           className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center gap-2"
                         >
                           <Flag className="w-4 h-4" />
