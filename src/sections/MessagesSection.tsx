@@ -65,10 +65,16 @@ export function MessagesSection({ searchQuery, onSearchQueryChange }: MessagesSe
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [incomingOffer, setIncomingOffer] = useState<RTCSessionDescriptionInit | null>(null);
+  const [incomingCallerId, setIncomingCallerId] = useState<string | null>(null);
+  const [incomingCallerName, setIncomingCallerName] = useState<string | null>(null);
   const [callChannel, setCallChannel] = useState<any>(null);
+  const callInboxChannelRef = useRef<any>(null);
   const [peerConnection, setPeerConnection] = useState<RTCPeerConnection | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const ringToneRef = useRef<{ oscillator: OscillatorNode; gain: GainNode } | null>(null);
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
+  const remoteAudioRef = useRef<HTMLAudioElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -82,7 +88,7 @@ export function MessagesSection({ searchQuery, onSearchQueryChange }: MessagesSe
 
     initializeChat();
 
-    const subscription = supabase
+    const messagesChannel = supabase
       .channel('messages')
       .on('postgres_changes',
         { event: '*', schema: 'public', table: 'messages' },
@@ -92,11 +98,18 @@ export function MessagesSection({ searchQuery, onSearchQueryChange }: MessagesSe
           }
           fetchConversations();
         }
-      )
-      .subscribe();
+      );
+
+    const subscribeChannels = async () => {
+      await messagesChannel.subscribe();
+      await setupCallInbox();
+    };
+
+    subscribeChannels();
 
     return () => {
-      subscription.unsubscribe();
+      messagesChannel.unsubscribe();
+      callInboxChannelRef.current?.unsubscribe();
     };
   }, [user, selectedUser]);
 
@@ -235,6 +248,78 @@ export function MessagesSection({ searchQuery, onSearchQueryChange }: MessagesSe
     });
   };
 
+  const getAudioContext = () => {
+    if (!audioContextRef.current) {
+      audioContextRef.current = new window.AudioContext();
+    }
+    return audioContextRef.current;
+  };
+
+  const startRingtone = async () => {
+    if (ringToneRef.current) return;
+
+    const audioContext = getAudioContext();
+    if (audioContext.state === 'suspended') {
+      await audioContext.resume();
+    }
+
+    const oscillator = audioContext.createOscillator();
+    const gain = audioContext.createGain();
+
+    oscillator.type = 'sine';
+    oscillator.frequency.value = 440;
+    gain.gain.value = 0.04;
+
+    oscillator.connect(gain);
+    gain.connect(audioContext.destination);
+    oscillator.start();
+
+    ringToneRef.current = { oscillator, gain };
+  };
+
+  const stopRingtone = () => {
+    if (!ringToneRef.current) return;
+
+    ringToneRef.current.oscillator.stop();
+    ringToneRef.current.oscillator.disconnect();
+    ringToneRef.current.gain.disconnect();
+    ringToneRef.current = null;
+  };
+
+  const getCallInboxChannelName = (userId: string) => {
+    return `call-inbox-${userId}`;
+  };
+
+  const setupCallInbox = async () => {
+    if (!user) return;
+
+    const channelName = getCallInboxChannelName(user.id);
+    const channel = supabase.channel(channelName);
+
+    channel.on('broadcast', { event: 'call-signal' }, ({ payload }: any) => {
+      handleCallSignal(payload);
+    });
+
+    await channel.subscribe();
+    callInboxChannelRef.current = channel;
+  };
+
+  const createCallChannel = async (otherUserId: string) => {
+    if (!user) return null;
+    if (callChannel) return callChannel;
+
+    const channelName = getCallChannelName(user.id, otherUserId);
+    const channel = supabase.channel(channelName);
+
+    channel.on('broadcast', { event: 'call-signal' }, ({ payload }: any) => {
+      handleCallSignal(payload);
+    });
+
+    await channel.subscribe();
+    setCallChannel(channel);
+    return channel;
+  };
+
   const setupPeerConnection = (channel: any) => {
     const pc = new RTCPeerConnection({
       iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }],
@@ -254,13 +339,13 @@ export function MessagesSection({ searchQuery, onSearchQueryChange }: MessagesSe
       event.streams[0] && setRemoteStream(event.streams[0]);
     };
 
-    pc.onconnectionstatechange = () => {
+    pc.onconnectionstatechange = async () => {
       if (pc.connectionState === 'connected') {
         setCallStatus('in_call');
       }
 
       if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
-        endCall();
+        await endCall();
       }
     };
 
@@ -278,22 +363,17 @@ export function MessagesSection({ searchQuery, onSearchQueryChange }: MessagesSe
     setLocalStream(null);
     setRemoteStream(null);
     setIncomingOffer(null);
+    setIncomingCallerId(null);
+    setIncomingCallerName(null);
     setCallType(null);
     setCallStatus('idle');
     setIsMuted(false);
   };
 
   const acceptCall = async () => {
-    if (!incomingOffer || !selectedUser || !user) return;
-    const channelName = getCallChannelName(user.id, selectedUser.id);
-    const channel = callChannel || supabase.channel(channelName);
-
-    if (!callChannel) {
-      channel.on('broadcast', { event: 'call-signal' }, ({ payload }: any) => {
-        handleCallSignal(payload);
-      }).subscribe();
-      setCallChannel(channel);
-    }
+    if (!incomingOffer || !incomingCallerId || !user) return;
+    const channel = await createCallChannel(incomingCallerId);
+    if (!channel) return;
 
     setCallModalOpen(true);
     setCallStatus('connecting');
@@ -318,16 +398,14 @@ export function MessagesSection({ searchQuery, onSearchQueryChange }: MessagesSe
   };
 
   const rejectCall = async () => {
-    if (!user || !selectedUser) return;
-    const channelName = getCallChannelName(user.id, selectedUser.id);
-    const channel = callChannel || supabase.channel(channelName);
+    if (!user || !incomingCallerId) return;
+    const hangupChannel = callChannel || supabase.channel(getCallInboxChannelName(incomingCallerId));
+
     if (!callChannel) {
-      channel.on('broadcast', { event: 'call-signal' }, ({ payload }: any) => {
-        handleCallSignal(payload);
-      }).subscribe();
-      setCallChannel(channel);
+      await hangupChannel.subscribe();
     }
-    await sendCallSignal(channel, {
+
+    await sendCallSignal(hangupChannel, {
       type: 'hangup',
       from: user.id,
     });
@@ -338,9 +416,12 @@ export function MessagesSection({ searchQuery, onSearchQueryChange }: MessagesSe
     if (!payload || payload.from === user?.id) return;
 
     if (payload.type === 'offer') {
-      if (!selectedUser || selectedUser.id !== payload.from) {
+      if (callStatus !== 'idle') {
         return;
       }
+
+      setIncomingCallerId(payload.callerId || payload.from);
+      setIncomingCallerName(payload.callerName || payload.from);
       setCallModalOpen(true);
       setCallType(payload.callType);
       setIncomingOffer(payload.offer);
@@ -427,9 +508,17 @@ export function MessagesSection({ searchQuery, onSearchQueryChange }: MessagesSe
       remoteVideoRef.current.play().catch(() => undefined);
     }
 
+    if (remoteAudioRef.current && remoteStream) {
+      remoteAudioRef.current.srcObject = remoteStream;
+      remoteAudioRef.current.play().catch(() => undefined);
+    }
+
     return () => {
       if (remoteVideoRef.current) {
         remoteVideoRef.current.srcObject = null;
+      }
+      if (remoteAudioRef.current) {
+        remoteAudioRef.current.srcObject = null;
       }
     };
   }, [remoteStream]);
@@ -437,8 +526,17 @@ export function MessagesSection({ searchQuery, onSearchQueryChange }: MessagesSe
   useEffect(() => {
     return () => {
       cleanupCallResources();
+      stopRingtone();
     };
   }, []);
+
+  useEffect(() => {
+    if (callStatus === 'connecting' || callStatus === 'incoming') {
+      void startRingtone();
+    } else {
+      stopRingtone();
+    }
+  }, [callStatus]);
 
   const toggleAudioMute = () => {
     if (localStream) {
@@ -450,6 +548,11 @@ export function MessagesSection({ searchQuery, onSearchQueryChange }: MessagesSe
   };
 
   const endCall = async () => {
+    if (callStatus === 'incoming') {
+      await rejectCall();
+      return;
+    }
+
     if (callChannel) {
       await sendCallSignal(callChannel, {
         type: 'hangup',
@@ -462,16 +565,10 @@ export function MessagesSection({ searchQuery, onSearchQueryChange }: MessagesSe
   const startCall = async (type: CallType) => {
     if (!selectedUser || !canChat || !user) return;
 
-    const channelName = getCallChannelName(user.id, selectedUser.id);
-    let channel = callChannel;
-
-    if (!channel) {
-      channel = supabase.channel(channelName);
-      channel.on('broadcast', { event: 'call-signal' }, ({ payload }: any) => {
-        handleCallSignal(payload);
-      });
-      await channel.subscribe();
-      setCallChannel(channel);
+    const callChannel = await createCallChannel(selectedUser.id);
+    if (!callChannel) {
+      setCallStatus('failed');
+      return;
     }
 
     setCallModalOpen(true);
@@ -493,15 +590,19 @@ export function MessagesSection({ searchQuery, onSearchQueryChange }: MessagesSe
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       setLocalStream(stream);
 
-      const pc = setupPeerConnection(channel);
+      const pc = setupPeerConnection(callChannel);
       stream.getTracks().forEach((track) => pc.addTrack(track, stream));
 
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
-      await sendCallSignal(channel, {
+      const inboxChannel = supabase.channel(getCallInboxChannelName(selectedUser.id));
+      await inboxChannel.subscribe();
+      await sendCallSignal(inboxChannel, {
         type: 'offer',
         from: user.id,
+        callerId: user.id,
+        callerName: (user as any)?.email || 'Caller',
         callType: type,
         offer: pc.localDescription,
       });
@@ -856,7 +957,9 @@ export function MessagesSection({ searchQuery, onSearchQueryChange }: MessagesSe
                               {callType === 'video' ? 'Video Call' : 'Audio Call'}
                             </p>
                             <p className="text-xl font-semibold text-slate-900 dark:text-white">
-                              Calling {selectedUser.full_name || selectedUser.username}
+                                {callStatus === 'incoming'
+                                  ? `Incoming from ${incomingCallerName || 'Caller'}`
+                                  : `Calling ${selectedUser?.full_name || selectedUser?.username}`}
                             </p>
                             <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
                               {callStatus === 'connecting' && 'Connecting...'}
@@ -897,12 +1000,15 @@ export function MessagesSection({ searchQuery, onSearchQueryChange }: MessagesSe
                               )}
                             </div>
                           ) : (
+                            <>
+                            <audio ref={remoteAudioRef} autoPlay hidden />
                             <div className="flex flex-col items-center justify-center gap-3 text-slate-700 dark:text-slate-200">
                               <div className="w-24 h-24 rounded-full bg-indigo-600 flex items-center justify-center text-white text-3xl">
                                 {selectedUser.full_name?.[0] || selectedUser.username[0]}
                               </div>
                               <p className="text-lg font-semibold">Audio call connected</p>
                             </div>
+                            </>
                           )}
                         </div>
                         <div className="flex flex-col gap-4">
